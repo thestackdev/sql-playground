@@ -88,5 +88,164 @@ WHERE EXISTS(SELECT 1
 SELECT *
 FROM customers c
 WHERE NOT EXISTS(SELECT 1
+                 FROM orders o
+                 WHERE o.customer_id = c.customer_id);
+
+
+-- 3. Find customers who have placed at least one order over $200 but have no orders that were returned.
+SELECT *
+FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.total_amount > 200 AND o.customer_id = c.customer_id)
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                          JOIN orders o ON o.order_id = r.order_id
+                 WHERE o.customer_id = c.customer_id);
+
+-- 4. Find delivered orders placed in 2024 that have not been returned and belong to customers who joined before 2024.
+SELECT o.order_id, o.order_date, o.total_amount
+FROM orders o
+         JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_date BETWEEN '2024-01-01' AND '2025-01-01'
+  AND c.join_date < '2024-01-01'
+  AND o.status = 'Delivered'
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                 WHERE r.order_id = o.order_id);
+
+
+-- 5. Find customers where every order they placed has been returned.
+SELECT *
+FROM customers c
+WHERE EXISTS(SELECT 1
              FROM orders o
-             WHERE o.customer_id = c.customer_id);
+             WHERE o.customer_id = c.customer_id)
+  AND NOT EXISTS(SELECT 1
+                 FROM orders o
+                 WHERE c.customer_id = o.customer_id
+                   AND NOT EXISTS(SELECT 1
+                                  FROM orderreturns r
+                                  WHERE r.order_id = o.order_id));
+
+-- 6. Find customers who joined before 2023-06-01 and have at least one order over $150 in 2023, but none of their orders in 2023 were returned.
+SELECT c.*
+FROM customers c
+WHERE c.join_date < '2023-06-01'
+  AND EXISTS(SELECT 1
+             FROM orders o
+             WHERE o.total_amount > 150
+               AND o.customer_id = c.customer_id
+               AND EXTRACT(YEAR FROM o.order_date) = 2023)
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                          JOIN orders o ON o.order_id = r.order_id
+                 WHERE o.customer_id = c.customer_id
+                   AND EXTRACT(YEAR FROM o.order_date) = 2023);
+
+-- 7. List orders with status ‘Pending’ for customers who have at least one delivered order in the past.
+SELECT *
+FROM orders o
+         JOIN customers c ON c.customer_id = o.customer_id
+WHERE status = 'Pending'
+  AND EXISTS(SELECT 1
+             FROM orders o2
+             WHERE o2.status = 'Delivered'
+               AND o2.customer_id = c.customer_id);
+
+
+-- 8. Find customers who have placed orders but have no returns with a refund amount over $100.
+SELECT *
+FROM customers c
+WHERE EXISTS(SELECT 1
+             FROM orders o
+             WHERE o.customer_id = c.customer_id)
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                          JOIN orders o ON o.order_id = r.order_id
+                 WHERE o.customer_id = c.customer_id
+                   AND r.refund_amount > 100);
+
+-- 9. Find orders from customers who have exactly one order in the system.
+SELECT order_id, customer_id, order_date, total_amount, status
+FROM (SELECT *, COUNT(*) OVER (PARTITION BY customer_id) AS rn
+      FROM orders) ft
+WHERE rn = 1;
+
+
+-- 10. Identify customers who have returned at least one order but have at least one delivered order that was not returned.
+SELECT *
+FROM customers c
+WHERE EXISTS(SELECT 1
+             FROM orderreturns r
+                      JOIN orders o ON o.order_id = r.order_id
+             WHERE c.customer_id = o.customer_id)
+  AND EXISTS(SELECT 1
+             FROM orders o
+             WHERE o.customer_id = c.customer_id
+               AND status = 'Delivered'
+               AND NOT EXISTS(SELECT 1
+                              FROM orderreturns r
+                              WHERE r.order_id = o.order_id));
+
+
+-- 11. Find customers who placed at least three orders in 2023, and at least 50% of those orders were returned. Return the customer’s name, email, total orders in 2023, and number of returned orders.
+SELECT c.customer_name, c.email, COUNT(o.order_id), COUNT(r.order_id)
+FROM orders o
+         LEFT JOIN customers c ON o.customer_id = c.customer_id
+         LEFT JOIN orderreturns r ON r.order_id = o.order_id
+WHERE o.order_date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY c.customer_name, c.email
+HAVING COUNT(o.order_id) >= COUNT(o.order_id) / 2
+   AND COUNT(o.order_id) >= 3;
+
+-- 12. List orders (order_id, order_date, total_amount) from customers who have at least one other non-returned order with a total_amount over $200. Exclude orders that were returned.
+SELECT o.order_id, o.order_date, o.total_amount
+FROM orders o
+         LEFT JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.status = 'Delivered'
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                 WHERE r.order_id = o.order_id)
+  AND EXISTS(SELECT 1
+             FROM orders o2
+             WHERE o2.total_amount >= 200
+               AND o2.customer_id = c.customer_id
+               AND NOT EXISTS(SELECT 1
+                              FROM orderreturns r2
+                              WHERE r2.order_id = o2.order_id));
+
+-- 13. Find customers who joined before 2023 and have no orders or returns after 2023-12-31. Return customer_name and join_date.
+SELECT c.customer_name, c.join_date
+FROM customers c
+WHERE c.join_date < '2023-01-01'
+  AND NOT EXISTS(SELECT 1
+                 FROM orders o
+                 WHERE o.order_date > '2023-12-31'
+                   AND c.customer_id = o.order_id)
+  AND NOT EXISTS(SELECT 1
+                 FROM orderreturns r
+                          JOIN orders o ON o.order_id = r.order_id
+                 WHERE r.return_date > '2023-12-31'
+                   AND c.customer_id = o.customer_id);
+
+
+-- 14. Identify customers who have at least one pending order but no delivered or cancelled orders. Return customer_name and email.
+SELECT c.customer_name, c.email
+FROM customers c
+WHERE EXISTS(SELECT 1 FROM orders o WHERE status = 'Pending' AND c.customer_id = o.customer_id)
+  AND NOT EXISTS(SELECT 1
+                 FROM orders o
+                 WHERE status IN ('Delivered', 'Cancelled') AND c.customer_id = o.customer_id);
+
+-- 15. Find delivered orders placed in 2024 where the customer has at least one return in the last 6 months (from July 5, 2025, backward to January 5, 2025). Return order_id, order_date, total_amount, and customer_name.
+SELECT o.order_id, o.order_date, o.total_amount, c.customer_name
+FROM orders o
+LEFT JOIN Customers c ON c.customer_id = o.customer_id
+WHERE o.status = 'Delivered'
+AND EXTRACT(YEAR FROM o.order_date) = 2024
+AND exists(
+    SELECT 1 FROM orderreturns r
+             JOIN orders o2 on r.order_id = o2.order_id
+             WHERE r.order_id = o2.order_id
+             AND c.customer_id = o2.customer_id
+             AND return_date BETWEEN '2025-07-01' AND '2025-01-01'
+);
