@@ -92,10 +92,10 @@ WITH MonthSeries AS (SELECT GENERATE_SERIES('2024-09-01'::DATE, '2025-03-01'::DA
                                             '1 month'::INTERVAL) AS MonthStart),
      updated_orders_date AS (SELECT OrderID,
                                     CustomerID,
-                                    TO_CHAR(OrderDate, 'YYYY-MM-01') AS OrderDate,
+                                    DATE_TRUNC('month', OrderDate) AS OrderDate,
                                     TotalAmount
                              FROM orders)
 SELECT o.*
 FROM MonthSeries ms
-         LEFT JOIN updated_orders_date o ON o.orderdate::timestamp = ms.MonthStart
-ORDER BY OrderID;
+         LEFT JOIN updated_orders_date o ON o.orderdate::TIMESTAMP = ms.MonthStart
+ORDER BY OrderDate;
